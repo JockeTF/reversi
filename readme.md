@@ -1,0 +1,3 @@
+# Reversi
+
+Static reverse proxy.
