@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0"
 authors = ["Joakim Soderlund <joakim.soderlund@gmail.com>"]
+
+[dependencies]
+async-trait = "0.1.88"
+http = "1.3.1"
+pingora = { git = "https://github.com/JockeTF/pingora.git", features = ["proxy", "rustls"] }
+rustls = "0.23.27"
+
+[lints.clippy]
+pedantic = "warn"
