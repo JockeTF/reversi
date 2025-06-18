@@ -42,6 +42,7 @@ struct Mapper {
 }
 
 enum Target {
+    Error,
     Invalid,
     Redirect(String),
     Upstream(Peer),
@@ -86,6 +87,7 @@ impl<'a> FromIterator<&'a Host> for Mapper {
             let domain = spec.domain;
             let peer = HttpPeer::new(spec.upstream, false, domain.into());
             upstreams.insert(domain, Box::new(peer));
+            redirects.insert(domain, domain);
 
             for redirect in spec.redirects {
                 redirects.insert(*redirect, domain);
@@ -101,21 +103,27 @@ impl<'a> FromIterator<&'a Host> for Mapper {
 
 impl Mapper {
     fn resolve(&self, session: &mut Session) -> Target {
-        let lookup = session
+        let authority = session
             .get_header(header::HOST)
             .and_then(|header| header.to_str().ok())
             .or(session.req_header().uri.host())
             .and_then(|host| Authority::from_str(host).ok());
 
-        let Some(authority) = lookup else {
+        let Some(digest) = session.digest() else {
+            return Target::Error;
+        };
+
+        let Some(host) = authority.as_ref().map(Authority::host) else {
             return Target::Invalid;
         };
 
-        if let Some(peer) = self.upstreams.get(authority.host()) {
-            return Target::Upstream(peer.clone());
+        if digest.ssl_digest.is_some() {
+            if let Some(peer) = self.upstreams.get(host) {
+                return Target::Upstream(peer.clone());
+            }
         }
 
-        if let Some(target) = self.redirects.get(authority.host()) {
+        if let Some(target) = self.redirects.get(host) {
             let path = session.req_header().uri.path_and_query();
             let path = path.map_or("/", PathAndQuery::as_str);
             return Target::Redirect(format!("https://{target}{path}"));
@@ -137,6 +145,7 @@ impl ProxyHttp for Mapper {
         use http::StatusCode as Code;
 
         let mut headers = Box::new(match context.get_or_insert(self.resolve(session)) {
+            Target::Error => ResponseHeader::build(Code::INTERNAL_SERVER_ERROR, Some(0))?,
             Target::Invalid => ResponseHeader::build(Code::SERVICE_UNAVAILABLE, Some(0))?,
             Target::Upstream(_) => return Ok(false),
             Target::Redirect(target) => {
@@ -175,7 +184,7 @@ impl Reversi {
         let mut server = Server::new(None).unwrap();
         let mut service = http_proxy_service(&server.configuration, mapper);
 
-        service.add_tcp("[::]:8080"); // TODO: Redirect only.
+        service.add_tcp("[::]:8080");
         service.add_tls_with_settings("[::]:8443", None, tls);
 
         server.bootstrap();
