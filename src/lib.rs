@@ -20,9 +20,9 @@ use pingora::proxy::ProxyHttp;
 use pingora::proxy::Session;
 use pingora::proxy::http_proxy_service;
 use pingora::server::Server;
-use pingora::tls::cert_resolvers::CertifiedKey;
-use pingora::tls::cert_resolvers::ResolvesServerCertUsingSni;
 use pingora::tls::load_certs_and_key_files;
+use rustls::server::ResolvesServerCertUsingSni;
+use rustls::sign::CertifiedKey;
 
 type Peer = Box<HttpPeer>;
 
@@ -62,6 +62,7 @@ impl Host {
 
 impl<'a> FromIterator<&'a Host> for TlsSettings {
     fn from_iter<T: IntoIterator<Item = &'a Host>>(iter: T) -> Self {
+        let mut settings = TlsSettings::intermediate("", "").unwrap();
         let mut certs = ResolvesServerCertUsingSni::new();
 
         for domain in iter.into_iter().flat_map(Host::domains) {
@@ -74,7 +75,8 @@ impl<'a> FromIterator<&'a Host> for TlsSettings {
             certs.add(domain, ck).unwrap();
         }
 
-        TlsSettings::resolver(Arc::new(certs)).unwrap()
+        settings.set_cert_resolver(Arc::new(certs));
+        settings
     }
 }
 
@@ -117,6 +119,7 @@ impl Mapper {
             return Target::Invalid;
         };
 
+        #[allow(clippy::collapsible_if)]
         if digest.ssl_digest.is_some() {
             if let Some(peer) = self.upstreams.get(host) {
                 return Target::Upstream(peer.clone());
